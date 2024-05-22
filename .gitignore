@@ -1,6 +1,6 @@
 ### dotenv template
 .env
-random
+random.txt
 scheduled.*
 
 ### PyCharm template
