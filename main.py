@@ -1,15 +1,20 @@
 import datetime
+import json
 import os
-import shelve
-from dotenv import load_dotenv
 import random
+import shelve
+import urllib.parse
+from typing import Any
 
+import aiohttp
 import discord
 from discord import app_commands
-from discord.ext import tasks, commands
+from discord.ext import commands, tasks
+from dotenv import load_dotenv
 
 load_dotenv()  # load all the variables from the env file
 token = os.getenv("TOKEN")
+BLEND_WEBHOOK_URL = os.getenv("BLEND_WEBHOOK_URL")
 
 RDL = discord.Object(id=296802696243970049)
 roles = [894572168426430474, 296803054403977216]
@@ -136,9 +141,113 @@ async def get_blend():
                     f.write(f"{level}\n")
 
 
+def parse_level_id(level_url: str) -> str:
+    """
+    Grabs the level id from a codex.rhythm.cafe download URL.
+    """
+    parsed_url = urllib.parse.urlparse(level_url)
+    if parsed_url.hostname != "codex.rhythm.cafe":
+        raise ValueError(
+            f"Unknown hostname: '{parsed_url.hostname}', "
+            + "expected 'codex.rhythm.cafe'"
+        )
+
+    return parsed_url.path.removeprefix("/").removesuffix(".rdzip")
+
+
+def embed_truncate(string: str) -> str:
+    """
+    Truncates the given input string to be the maximum length allowed by
+    discord.Embed.add_field().
+    """
+    return (string[:253] + "...") if len(string) > 256 else string
+
+
 async def blend_level(level: str):
-    await client.morgue.send(f"rdzip^blend {level}")
     print(f"Blending {level} at {datetime.datetime.now()}")
+
+    level_id = parse_level_id(level)
+    cafe_url = (
+        f"https://api.rhythm.cafe/datasette/orchard/level/{level_id}.json?_shape=array"
+    )
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(cafe_url) as r:
+            if r.status == 404:
+                raise Exception(f"Failed to find level with id '{level_id}'.")
+            elif r.status != 200:
+                raise Exception("Failed to fetch level metadata from rhythm.cafe.")
+
+            json_array: list[dict[str, Any]] = await r.json()
+            metadata = json_array[0]
+
+        authors_list = json.loads(metadata["authors"])
+        tags_list = (f"**[{tag}]**" for tag in json.loads(metadata["tags"]))
+
+        authors = embed_truncate(", ".join(authors_list))
+        tags = embed_truncate(", ".join(tags_list))
+
+        if metadata["single_player"] == 1 and metadata["two_player"] == 1:
+            player_display = "1P + 2P"
+        elif metadata["single_player"] == 1:
+            player_display = "1P"
+        elif metadata["two_player"] == 1:
+            player_display = "2P"
+        else:
+            raise Exception("Level somehow doesn't support 1P nor 2P!")
+
+        match metadata["difficulty"]:
+            case 0:
+                difficulty = "Easy"
+            case 1:
+                difficulty = "Medium"
+            case 2:
+                difficulty = "Tough"
+            case 3:
+                difficulty = "Very Tough"
+            case _:
+                raise Exception(
+                    f"Unknown level metadata difficulty: {metadata['difficulty']}"
+                )
+
+        timestamp = (
+            datetime.datetime.now(datetime.UTC).today().strftime("%A, %B %d, %Y")
+        )
+
+        embed = discord.Embed(color=discord.Color.purple())
+        embed.set_author(name=f"Daily Blend: {timestamp}")
+
+        embed.add_field(
+            name="Level",
+            value=f"{metadata['artist']} - {metadata['song']}",
+            inline=True,
+        )
+        embed.add_field(name="Creator", value=authors, inline=True)
+
+        if "description" in metadata and metadata["description"]:
+            embed.add_field(
+                name="Description",
+                value=embed_truncate(metadata["description"]),
+                inline=False,
+            )
+
+        embed.add_field(name="Tags", value=tags, inline=False)
+        embed.add_field(name="Modes", value=player_display, inline=True)
+        embed.add_field(name="Difficulty", value=difficulty, inline=True)
+        embed.add_field(
+            name="Download", value=f"[Link]({metadata['url2']})", inline=True
+        )
+        embed.set_image(url=metadata["image"])
+
+        bottom_embed = discord.Embed(
+            description="The Daily Blend Café is like a book club for custom levels! "
+            + "Play the daily level and post your score (enable Detailed Level Results in Advanced Settings), "
+            + "and leave a comment with what you liked about the level!",
+        )
+        bottom_embed.set_author(name="About the Daily Blend Café")
+
+        webhook = discord.Webhook.from_url(BLEND_WEBHOOK_URL, session=session)
+        await webhook.send(embeds=[embed, bottom_embed])
 
 
 client.run(token)
