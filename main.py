@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 RDL = discord.Object(id=296802696243970049)
 ROLES = [894572168426430474, 296803054403977216]
 
-BLEND_TIME = datetime.time(5, 0, 0)
+BLEND_TIME = datetime.time(4, 0, 0)
 
 
 @dataclass
@@ -130,8 +130,8 @@ async def date_blend(interaction: discord.Interaction, level: str, date: str):
 @commands.has_any_role(*ROLES)
 @app_commands.describe(level="Level to blend")
 async def force_blend(interaction: discord.Interaction, level: str):
-    await blend_level(level)
     await interaction.response.send_message("Blending!")
+    await blend_level(level)
     print(f"Force blend {level}.")
 
 
@@ -283,8 +283,23 @@ async def blend_level(level: str):
         )
         bottom_embed.set_author(name="About the Daily Blend Café")
 
-        webhook = discord.Webhook.from_url(CONFIG.blend_webhook_url, session=session)
-        await webhook.send(embeds=[embed, bottom_embed])
+        webhook = await discord.Webhook.from_url(
+            CONFIG.blend_webhook_url, session=session, client=client
+        ).fetch()
+
+        if not isinstance(webhook.channel, discord.TextChannel):
+            raise Exception("Webhook is invalid: channel type is not TextChannel")
+
+        message = await webhook.send(embeds=[embed, bottom_embed], wait=True)
+
+        old_pins = await webhook.channel.pins()
+        last_pin = discord.utils.find(lambda m: m.webhook_id == webhook.id, old_pins)
+        if last_pin is None:
+            print("Failed to find old blend message to unpin!!")
+        else:
+            await last_pin.unpin()
+
+        await message.pin()
 
 
 if __name__ == "__main__":
