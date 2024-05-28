@@ -4,6 +4,7 @@ import os
 import random
 import shelve
 import urllib.parse
+from dataclasses import dataclass
 from typing import Any
 
 import aiohttp
@@ -12,39 +13,70 @@ from discord import app_commands
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
 
-load_dotenv()  # load all the variables from the env file
-token = os.getenv("TOKEN")
-BLEND_WEBHOOK_URL = os.getenv("BLEND_WEBHOOK_URL")
-
 RDL = discord.Object(id=296802696243970049)
-roles = [894572168426430474, 296803054403977216]
+ROLES = [894572168426430474, 296803054403977216]
+
+BLEND_TIME = datetime.time(5, 0, 0)
+
+
+@dataclass
+class Config:
+    token: str
+    blend_webhook_url: str
+
+
+def read_config() -> Config:
+    # load all the variables from the .env file into environment variables
+    load_dotenv()
+
+    token = os.getenv("TOKEN")
+    if token is None:
+        print("Missing variable in .env: TOKEN")
+        exit(1)
+
+    blend_webhook_url = os.getenv("BLEND_WEBHOOK_URL")
+    if blend_webhook_url is None:
+        print("Missing variable in .env: BLEND_WEBHOOK_URL")
+        exit(1)
+
+    return Config(token, blend_webhook_url)
+
+
+CONFIG = read_config()
 
 
 class Blender(discord.Client):
     def __init__(self, *, intent: discord.Intents):
         super().__init__(intents=intent)
-        self.pharmacy = None
-        self.morgue = None
+        self.pharmacy: discord.TextChannel
+        self.morgue: discord.TextChannel
 
-        self.blend_time = datetime.time(5, 0, 0)
-        self.blend = ""
+        self.to_blend: str | None = None
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self):
         self.tree.copy_global_to(guild=RDL)
         await self.tree.sync(guild=RDL)
 
+    def get_text_channel(self, id: int) -> discord.TextChannel:
+        channel = self.get_channel(id)
+        if channel is None:
+            raise Exception(f"Couldn't find channel with id {id}.")
+        if not isinstance(channel, discord.TextChannel):
+            raise Exception(f"Channel with id {id} is not a TextChannel.")
+        return channel
 
-intents = discord.Intents.default()
-client = Blender(intent=intents)
+
+client = Blender(intent=discord.Intents.default())
 
 
 @client.event
 async def on_ready():
+    assert client.user is not None
     print(f"Logged in as {client.user} (ID: {client.user.id})")
     print("------")
-    client.morgue = await client.fetch_channel(362784581344034816)
-    client.pharmacy = await client.fetch_channel(419900766279696384)
+    client.morgue = client.get_text_channel(362784581344034816)
+    client.pharmacy = client.get_text_channel(419900766279696384)
     await client.change_presence(
         activity=discord.CustomActivity(
             "Making coffee ☕", emoji=discord.PartialEmoji.from_str("coffee")
@@ -57,10 +89,10 @@ async def on_ready():
     name="blend",
     description="Blends a level today",
 )
-@commands.has_any_role(*roles)
+@commands.has_any_role(*ROLES)
 @app_commands.describe(level="Level to blend")
 async def blend_today(interaction: discord.Interaction, level: str):
-    client.blend = level
+    client.to_blend = level
     await interaction.response.send_message(f"Blending {level} today.")
     print(f"Blending {level} today.")
 
@@ -68,7 +100,7 @@ async def blend_today(interaction: discord.Interaction, level: str):
 @client.tree.command(
     name="randomblend", description="Adds level to list of random blends"
 )
-@commands.has_any_role(*roles)
+@commands.has_any_role(*ROLES)
 @app_commands.describe(level="Level to blend")
 async def random_blend(interaction: discord.Interaction, level: str):
     with open("random.txt", "a") as f:
@@ -81,7 +113,7 @@ async def random_blend(interaction: discord.Interaction, level: str):
     name="queueblend",
     description="Schedules level to blend on date",
 )
-@commands.has_any_role(*roles)
+@commands.has_any_role(*ROLES)
 @app_commands.describe(level="level to blend", date="MM DD")
 async def date_blend(interaction: discord.Interaction, level: str, date: str):
     db = shelve.open("scheduled")
@@ -95,7 +127,7 @@ async def date_blend(interaction: discord.Interaction, level: str, date: str):
     name="forceblend",
     description="Blends right now",
 )
-@commands.has_any_role(*roles)
+@commands.has_any_role(*ROLES)
 @app_commands.describe(level="Level to blend")
 async def force_blend(interaction: discord.Interaction, level: str):
     await blend_level(level)
@@ -104,46 +136,51 @@ async def force_blend(interaction: discord.Interaction, level: str):
 
 
 @client.tree.command(name="viewqueue", description="View levels in queue")
-@commands.has_any_role(*roles)
+@commands.has_any_role(*ROLES)
 async def view_queue(interaction: discord.Interaction):
     db = shelve.open("scheduled")
-    res = ""
-    for k, v in sorted(dict(db).items()):
-        res += f"{k}: {v}\n"
-    await interaction.response.send_message(res)
+    message = "\n".join(f"{k}: {v}" for k, v in sorted(dict(db).items()))
+    await interaction.response.send_message(message)
 
 
 @client.tree.command(name="viewrandom", description="View levels in random")
-@commands.has_any_role(*roles)
+@commands.has_any_role(*ROLES)
 async def view_random(interaction: discord.Interaction):
     with open("random.txt", "r") as f:
         await interaction.response.send_message(f.read())
 
 
-@tasks.loop(time=client.blend_time)
+@tasks.loop(time=BLEND_TIME)
 async def get_blend():
-    if client.blend:
-        await blend_level(client.blend)
-        client.blend = ""
-    else:
-        try:
-            today = datetime.datetime.now(datetime.UTC).today()
-            today_str = today.strftime("%m %d")
-            db = shelve.open("scheduled")
-            await blend_level(db[today_str])
-            del db[today_str]
-        except KeyError:
-            levels = open("random.txt").read().splitlines()
-            print(levels)
-            await blend_level(levels.pop(random.randrange(len(levels))))
-            with open("random.txt", "w") as f:
-                for level in levels:
-                    f.write(f"{level}\n")
+    # Check if there's a blend queued using the blend_today command
+    if client.to_blend is not None:
+        await blend_level(client.to_blend)
+        client.to_blend = None
+        return
+
+    # Check if there's a blend scheduled for today
+    today = datetime.datetime.now(datetime.UTC).today()
+    today_str = today.strftime("%m %d")
+    db = shelve.open("scheduled")
+    if today_str in db:
+        await blend_level(db[today_str])
+        del db[today_str]
+        return
+
+    # Otherwise, blend a random level
+    levels = open("random.txt").read().splitlines()
+    print(levels)
+    await blend_level(levels.pop(random.randrange(len(levels))))
+    with open("random.txt", "w") as f:
+        for level in levels:
+            f.write(f"{level}\n")
 
 
 def parse_level_id(level_url: str) -> str:
     """
     Grabs the level id from a codex.rhythm.cafe download URL.
+    Expects the input URL to look like
+    https://codex.rhythm.cafe/cool-name-ABCdef123asdf.rdzip
     """
     parsed_url = urllib.parse.urlparse(level_url)
     if parsed_url.hostname != "codex.rhythm.cafe":
@@ -246,8 +283,9 @@ async def blend_level(level: str):
         )
         bottom_embed.set_author(name="About the Daily Blend Café")
 
-        webhook = discord.Webhook.from_url(BLEND_WEBHOOK_URL, session=session)
+        webhook = discord.Webhook.from_url(CONFIG.blend_webhook_url, session=session)
         await webhook.send(embeds=[embed, bottom_embed])
 
 
-client.run(token)
+if __name__ == "__main__":
+    client.run(CONFIG.token)
