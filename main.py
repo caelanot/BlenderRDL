@@ -305,8 +305,6 @@ async def blend_level(level: str):
         else:
             await last_pin.unpin()
 
-        # print(metadata)
-
         await message.pin()
 
 
