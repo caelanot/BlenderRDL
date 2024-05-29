@@ -233,15 +233,21 @@ async def blend_level(level: str):
         else:
             raise Exception("Level somehow doesn't support 1P nor 2P!")
 
+        difficulty = "Medium"
+        difficulty_color = 0xEF6E29
         match metadata["difficulty"]:
             case 0:
                 difficulty = "Easy"
+                difficulty_color = 0x62C64A
             case 1:
                 difficulty = "Medium"
+                difficulty_color = 0xEF6E29
             case 2:
                 difficulty = "Tough"
+                difficulty_color = 0xB94646
             case 3:
                 difficulty = "Very Tough"
+                difficulty_color = 0x9466CE
             case _:
                 raise Exception(
                     f"Unknown level metadata difficulty: {metadata['difficulty']}"
@@ -251,12 +257,12 @@ async def blend_level(level: str):
             datetime.datetime.now(datetime.UTC).today().strftime("%A, %B %d, %Y")
         )
 
-        embed = discord.Embed(color=discord.Color.purple())
+        embed = discord.Embed(color=difficulty_color)
         embed.set_author(name=f"Daily Blend: {timestamp}")
 
         embed.add_field(
             name="Level",
-            value=f"{metadata['artist']} - {metadata['song']}",
+            value=f"{metadata['artist'].strip()} \- {metadata['song'].strip()}",
             inline=True,
         )
         embed.add_field(name="Creator", value=authors, inline=True)
@@ -298,6 +304,8 @@ async def blend_level(level: str):
             print("Failed to find old blend message to unpin!!")
         else:
             await last_pin.unpin()
+
+        # print(metadata)
 
         await message.pin()
 
