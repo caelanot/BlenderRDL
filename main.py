@@ -256,7 +256,7 @@ async def blend_level(level: str):
 
         embed.add_field(
             name="Level",
-            value=f"{metadata['artist'].strip()} \- {metadata['song'].strip()}",
+            value=f"{metadata['artist'].strip()} \\- {metadata['song'].strip()}",
             inline=True,
         )
         embed.add_field(name="Creator", value=authors, inline=True)
