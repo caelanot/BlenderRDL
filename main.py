@@ -159,7 +159,7 @@ async def get_blend():
         return
 
     # Check if there's a blend scheduled for today
-    today = datetime.datetime.now(datetime.UTC).today()
+    today = datetime.datetime.now(datetime.UTC)
     today_str = today.strftime("%m %d")
     db = shelve.open("scheduled")
     if today_str in db:
@@ -169,7 +169,6 @@ async def get_blend():
 
     # Otherwise, blend a random level
     levels = open("random.txt").read().splitlines()
-    print(levels)
     await blend_level(levels.pop(random.randrange(len(levels))))
     with open("random.txt", "w") as f:
         for level in levels:
@@ -234,30 +233,25 @@ async def blend_level(level: str):
             raise Exception("Level somehow doesn't support 1P nor 2P!")
 
         difficulty = "Medium"
-        difficulty_color = 0xEF6E29
         match metadata["difficulty"]:
             case 0:
                 difficulty = "Easy"
-                difficulty_color = 0x62C64A
             case 1:
                 difficulty = "Medium"
-                difficulty_color = 0xEF6E29
             case 2:
                 difficulty = "Tough"
-                difficulty_color = 0xB94646
             case 3:
                 difficulty = "Very Tough"
-                difficulty_color = 0x9466CE
             case _:
                 raise Exception(
                     f"Unknown level metadata difficulty: {metadata['difficulty']}"
                 )
 
-        timestamp = (
-            datetime.datetime.now(datetime.UTC).today().strftime("%A, %B %d, %Y")
-        )
+        timestamp = datetime.datetime.now(datetime.UTC).strftime("%A, %B %d, %Y")
 
-        embed = discord.Embed(color=difficulty_color)
+        embed = discord.Embed(
+            color=discord.Colour.from_hsv(metadata["hue"], 0.60, 0.95)
+        )
         embed.set_author(name=f"Daily Blend: {timestamp}")
 
         embed.add_field(
