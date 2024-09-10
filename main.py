@@ -150,6 +150,19 @@ async def view_random(interaction: discord.Interaction):
         await interaction.response.send_message(f.read())
 
 
+@client.tree.command(name="removeblend", description="Remove level from random queue")
+@commands.has_any_role(*ROLES)
+@app_commands.describe(remove="Level to remove")
+async def remove_blend(interaction: discord.Interaction, remove: str):
+    await interaction.response.send_message(f"Removing {remove}.")
+    print(f"Removing {remove}")
+    levels = open("random.txt").read().splitlines()
+    levels.remove(remove)
+    with open("random.txt", "w") as f:
+        for level in levels:
+            f.write(f"{level}\n")
+
+
 @tasks.loop(time=BLEND_TIME)
 async def get_blend():
     # Check if there's a blend queued using the blend_today command
