@@ -140,6 +140,7 @@ async def force_blend(interaction: discord.Interaction, level: str):
 async def view_queue(interaction: discord.Interaction):
     db = shelve.open("scheduled")
     message = "\n".join(f"{k}: {v}" for k, v in sorted(dict(db).items()))
+    message = message or "There are no levels queued!"
     await interaction.response.send_message(message)
 
 
